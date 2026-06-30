@@ -129,6 +129,29 @@ app.get("/stream/:videoId", async (req, res) => {
   }
 });
 
+// Proxy endpoint — streams audio through the server with proper headers
+app.get("/proxy/:videoId", async (req, res) => {
+  try {
+    const { videoId } = req.params;
+    const url = await getAudioUrl(videoId);
+    const audioRes = await fetch(url, {
+      headers: {
+        "User-Agent": USER_AGENT,
+        Referer: "https://www.youtube.com/",
+        Origin: "https://www.youtube.com",
+      },
+    });
+    if (!audioRes.ok) return res.status(502).json({ error: "audio rejected" });
+    res.setHeader("Content-Type", audioRes.headers.get("content-type") || "audio/mp4");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Transfer-Encoding", "chunked");
+    for await (const chunk of audioRes.body) res.write(chunk);
+    res.end();
+  } catch (e) {
+    if (!res.headersSent) res.status(500).json({ error: e.message });
+  }
+});
+
 app.get("/related", async (req, res) => {
   try {
     const { videoId } = req.query;
