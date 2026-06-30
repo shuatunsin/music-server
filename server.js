@@ -118,6 +118,9 @@ app.get("/search", async (req, res) => {
   }
 });
 
+// Quick ping to wake Render from sleep
+app.get("/ping", (req, res) => res.json({ ok: true }));
+
 app.get("/stream/:videoId", async (req, res) => {
   try {
     const { videoId } = req.params;
