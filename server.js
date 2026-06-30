@@ -1,6 +1,7 @@
 import express from "express";
 import YTMusic from "ytmusic-api";
-import { spawn } from "child_process";
+import { spawn, execSync } from "child_process";
+import ytdl from "@distube/ytdl-core";
 
 const app = express();
 const PORT = process.env.PORT || 3099;
@@ -8,14 +9,58 @@ const PORT = process.env.PORT || 3099;
 const ytm = new YTMusic();
 await ytm.initialize();
 
-function getAudioUrl(videoId) {
+const USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36";
+
+// Try to find yt-dlp in common locations
+function findYtdl() {
+  try {
+    const p = execSync("which yt-dlp", { encoding: "utf8" }).trim();
+    if (p) console.log("yt-dlp found at:", p);
+    return p || "yt-dlp";
+  } catch {
+    console.log("yt-dlp not found on PATH");
+    return null;
+  }
+}
+
+const YTDL_PATH = findYtdl();
+
+async function getAudioUrl(videoId) {
+  // Try yt-dlp first
+  if (YTDL_PATH) {
+    try {
+      const url = await spawnYtdl(YTDL_PATH, videoId);
+      if (url) return url;
+    } catch (e) {
+      console.warn("yt-dlp failed, trying ytdl-core:", e.message);
+    }
+  }
+
+  // Fallback to ytdl-core
+  try {
+    const info = await ytdl.getInfo(`https://www.youtube.com/watch?v=${videoId}`, {
+      requestOptions: { headers: { "User-Agent": USER_AGENT } },
+    });
+    const format = info.formats.find((f) => f.itag === 140 && f.url) ||
+      info.formats.find((f) => f.itag === 18 && f.url) ||
+      info.formats.find((f) => f.hasAudio && f.url);
+    if (format?.url) return format.url;
+  } catch (e) {
+    console.warn("ytdl-core also failed:", e.message);
+  }
+
+  throw new Error("Could not get audio URL");
+}
+
+function spawnYtdl(cmd, videoId) {
   return new Promise((resolve, reject) => {
-    const proc = spawn("yt-dlp", [
-      "-g",
-      "-f",
-      "bestaudio[ext=m4a]/bestaudio",
+    const proc = spawn(cmd, [
+      "-g", "-f", "bestaudio[ext=m4a]/bestaudio",
       `https://www.youtube.com/watch?v=${videoId}`,
-    ]);
+    ], {
+      env: { ...process.env, PATH: process.env.PATH },
+      timeout: 30000,
+    });
     let url = "";
     proc.stdout.on("data", (d) => (url += d.toString()));
     proc.on("close", (code) => {
